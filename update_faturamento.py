@@ -2,6 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.support.ui import Select
 import json
 import time
+import os
 
 
 def get_info():
@@ -35,3 +36,4 @@ url = 'https://artivinco.force.com/00O36000006ufjR'
 get_data(url)
 time.sleep(15)
 browser.quit()
+os.system("rm report.csv | mv /home/gasp/Downloads/*.csv ./report.csv")
