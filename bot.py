@@ -1,34 +1,11 @@
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Job
+from telegram import ForceReply
+from bot_utils import *
 import logging
-import json
 import os
-import csv
+import datetime
 
-def update_csv():
-        with open('report.csv', mode='r') as csv_file:
-                csv_reader = csv.DictReader(csv_file)
-
-                data = [[] for _ in range(6)]
-                for row in csv_reader:
-                        data[0].append(row["Cliente"])
-                        data[1].append(row["Referência"])
-                        data[2].append(row["Nota Fiscal: Número Nota Fiscal"])
-                        data[3].append(row["Quantidade faturada/entregue"])
-                        data[4].append(row["Nota Fiscal: Data e hora da emissão"])
-                        data[5].append(False)
-
-def str_pedido(data_pedido):
-        st = ''
-        for i in range(len(data[2])):
-                if data[2][i] == data_pedido and not data[6][i]:
-                        st+= ('\nCliente ' + data[1][i]
-                        + '\nPedido ' + data[3][i]
-                        + '\nProduto ' + data[4][i]
-                        + '\nStatus ' + data[5][i] + '\n')
-                        data[6][i] = True
-        return st
-
-token = open("token", "r").read()
+token = read_token()
 logged = False
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -37,52 +14,125 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 updater = Updater(token)
 j = updater.job_queue
+data,cont = list(),0
+
+def first_load_csv():
+        global data
+        with open('report.csv', mode='r') as csv_file:
+                csv_reader = csv.DictReader(csv_file)
+                for row in csv_reader:
+                        if row['Nota Fiscal: Número Nota Fiscal']:
+                                instance = dict()
+                                instance['cliente'] = row['Cliente']
+                                instance['ref']     = row['Referência']
+                                instance['nf']      = row['Nota Fiscal: Número Nota Fiscal']
+                                instance['qtd']     = row['Quantidade faturada/entregue']
+                                instance['nfdate']  = correct_date(row['Nota Fiscal: Data e hora da emissão'])  
+                                instance['pedido']  = row['Item de Pedido']
+                                data.append(instance)
+                                del instance
 
 
-def start(bot, update):
-    """Send a message when the command /start is issued."""
-    bot.send_message(chat_id=update.message.chat_id,
-                     text='Olá, eu sou o Severino. Sou o bot assistente da Artivinco.\nDigite /help para listar meus comandos!')
+def verify_update():
+        global data
+        with open('report.csv', mode='r') as csv_file:
+                csv_reader = csv.DictReader(csv_file)
+                to_return = ''
+                for row in csv_reader:
+                        if row['Nota Fiscal: Número Nota Fiscal']:
+                                instance = dict()
+                                instance['cliente'] = row['Cliente']
+                                instance['ref']     = row['Referência']
+                                instance['nf']      = row['Nota Fiscal: Número Nota Fiscal']
+                                instance['qtd']     = row['Quantidade faturada/entregue']
+                                instance['nfdate']  = correct_date(row['Nota Fiscal: Data e hora da emissão'])
+                                instance['pedido']  = row['Item de Pedido']
+                                if instance not in data:
+                                        data.append(instance)
+                                        to_return += convert_to_string(instance)
+                                        logger.info(''.join(['Nova atualização -',instance['cliente'], ' - NF ', instance['nf'], ' - Faturado em ', instance['nfdate']]))
+                                del instance
+        if to_return:
+                return to_return
+
+def start(bot, update, job_queue):
+        """Send a message when the command /start is issued."""
+        first_load_csv()
+        bot.send_message(chat_id=update.message.chat_id,
+                        text='Olá, eu sou o bot assistente da Artivinco.\nDigite /ajuda para listar meus comandos!')
+        job_queue.run_repeating(update_billing, interval=3600, first=2, context=update.message.chat_id)
 
 
 def help(bot, update):
-    """Send a message when the command /help is issued."""
-    bot.send_message(chat_id=update.message.chat_id,
-                     text='Segue lista com meus comandos\n\n' +
-                     '/login - Realiza autenticação Artivinco (informar o email e senha espaçados)\n' +
-                     '/logout - Cancela recebimento de notificações')
+        """Send a message when the command /ajuda is issued."""
+        bot.send_message(chat_id=update.message.chat_id,
+                        text='Segue lista com meus comandos\n\n' +
+                        '/atualizar - Recebe atualizações periodicas de faturamento\n' +
+                        'nf número_da_nf - Informa dados de faturamento de uma nota fiscal especifica\n' +
+                        'pedido número_do_pedido - Informa dados de de um pedido especifico')
 
 
 def status(bot, update):
-    data_pedido = update.message.text.split()
-    bot.send_message(chat_id=update.message.chat_id,
-                     text=str_pedido(data_pedido[1]))
-
-
-def login(bot, update):
-        texto = update.message.text.split()
-        credencial = {}
-        credencial['username'] = texto[1]
-        credencial['pass'] = texto[2]
-        with open('credential.json', 'w') as f:
-                json.dump(credencial, f)
-        j.run_repeating(atualiza_faturamento, interval=7200, first=0)
-
-def logout(bot, update):
-        global logged
-        logged = False
         bot.send_message(chat_id=update.message.chat_id,
-                         text='Cancelado atualizações periodicas.\nPara ativar novamente digite /login email senha.')
+                        text='Informe a NF ou o número do pedido',
+                        reply_markup=ForceReply())
+        status_attr(bot, update)
 
-def atualiza_faturamento(bot, job):
+
+def status_attr(bot, update):
+        text = update.message.text
+        bot.send_message(chat_id=update.message.chat_id,
+                         text=verify_attr('nf',text, data))
+
+# def login(bot, update):
+#         text = update.message.text.split()
+#         credencial = {}
+#         credencial['username'] = text[1]
+#         credencial['pass'] = text[2]
+#         with open('credential.json', 'w') as f:
+#                 json.dump(credencial, f)
+#         update_billing(bot, update)
+#         logged = True
+        
+
+# def logout(bot, update):
+#         bot.send_message(chat_id=update.message.chat_id,
+#                          text='Cancelado atualizações periodicas.\nPara ativar novamente digite /login email senha.')
+#         logged = False
+
+
+def update_billing(bot, job):
+        global cont
+        cont+=1
+        if cont>4:
+                logger.info("Sistema atualizado 5x")
+                cont=0
         os.system('python3 update_faturamento.py')
-        bot.send_message(chat_id=update.message.chat_id,
-                         text='Atualizado!')
+        updates = verify_update()
+        if updates:
+                bot.send_message(chat_id=job.context,
+                                text=updates)
 
 
-def atualiza_expedicao(bot, update):
-        os.system('python3 update_expedicao.py')
-        update.message.reply_text('Atualizado')
+def noncommand(bot, update):
+        text = (update.message.text).lower()
+        if 'nf' in text:
+                nf = text.split()[1]
+                info = verify_attr('nf',nf, data)
+                log = (''.join(['Nova consulta - NF ', nf]))
+                if(info=='Informação inválida'):
+                        log += ' - Invalido'
+                logger.info(log)
+        elif 'pedido' in text :
+                pedido = text.split()[1]
+                info = verify_attr('pedido',pedido, data)
+                log = (''.join(['Nova consulta - Pedido Nº', pedido]))
+                if(info=='Informação inválida'):
+                        log += ' - Invalido'
+                logger.info(log)
+        else:
+                info = 'Comando inválido {}\n\nTente por:\nnf número da nota fiscal\npedido número do pedido'.format(text.lower())
+        update.message.reply_text(info)
 
 
 def error(bot, update, error):
@@ -97,14 +147,15 @@ def main():
         dp = updater.dispatcher
 
         # on different commands - answer in Telegram
-        dp.add_handler(CommandHandler("start", start))
-        dp.add_handler(CommandHandler("help", help))
-        dp.add_handler(CommandHandler("login", login))
-        dp.add_handler(CommandHandler("logout", logout))
-        dp.add_handler(CommandHandler("atualiza", atualiza_faturamento))
+        dp.add_handler(CommandHandler("start", start, pass_job_queue=True))
+        dp.add_handler(CommandHandler("ajuda", help))
+        # dp.add_handler(CommandHandler("login", login))
+        # dp.add_handler(CommandHandler("logout", logout))
+        # dp.add_handler(CommandHandler("status", status))
+        dp.add_handler(CommandHandler("atualizar", update_billing))
 
         # on noncommand i.e message - echo the message on Telegram
-        # dp.add_handler(MessageHandler(Filters.text, echo))
+        dp.add_handler(MessageHandler(Filters.text, noncommand))
 
         # log all errors
         dp.add_error_handler(error)

@@ -6,34 +6,36 @@ import os
 
 
 def get_info():
-    with open('credential.json') as f:
-        return json.load(f)
+        with open('credential.json') as f:
+                return json.load(f)
 
 def login():
-    username = browser.find_element_by_id('username')
-    password = browser.find_element_by_id('password')
-    username.send_keys(credencial['username'])
-    password.send_keys(credencial['pass'])
-    password.submit()
-    return True
+        username = browser.find_element_by_id('username')
+        password = browser.find_element_by_id('password')
+        username.send_keys(credencial['username'])
+        password.send_keys(credencial['pass'])
+        password.submit()
+        return True
 
 def get_data(url):
-    global browser, logged
-    browser.get(url)
-    if not logged:
-        logged = login()
-    browser.find_element_by_name('csvsetup').click()
-    select = Select(browser.find_element_by_id('xf'))
-    select.select_by_value('csv')
-    browser.find_element_by_name('export').click()
+        global browser, logged
+        browser.get(url)
+        if not logged:
+                logged = login()
+        browser.find_element_by_name('csvsetup').click()
+        select = Select(browser.find_element_by_id('xf'))
+        select.select_by_value('csv')
+        browser.find_element_by_name('export').click()
 
 
 credencial = get_info()
-browser = webdriver.Chrome()
+options = webdriver.ChromeOptions()
+# options.headless = True
+browser = webdriver.Chrome('./chromedriver',chrome_options = options)
 browser.implicitly_wait(30)
 logged = False
 url = 'https://artivinco.force.com/00O36000006ufjR'
 get_data(url)
-time.sleep(15)
+time.sleep(10)
 browser.quit()
 os.system("rm report.csv | mv /home/gasp/Downloads/*.csv ./report.csv")
