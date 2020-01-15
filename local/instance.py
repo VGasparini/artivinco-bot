@@ -60,6 +60,6 @@ class Instance:
         return ret
     
     def auth(self, info):
-        if info == self.rep or info == 1066700692:
+        if info == self.rep or info in [1066700692, 650172463]:
             return True
         return False

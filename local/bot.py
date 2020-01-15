@@ -9,15 +9,18 @@ from user import *
 
 import seleniumrequests
 from selenium import webdriver
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Job
-from telegram import ForceReply
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Job, CallbackQueryHandler
+from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
+
 
 user = User()
 token = os.environ["API_TOKEN"]
 data = list()
 alive = False
-id_list = [650172463,1066700692]
+id_list = [1066700692, 912511604, 835688488]
+admin_list = [650172463,1066700692]
 last_update = ""
+table = ""
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s -> %(message)s", level=logging.INFO, datefmt='%d/%m %H:%M:%S'
@@ -37,11 +40,14 @@ def start(bot, update, job_queue):
     if not alive:
         alive = True
         first_load()
-        last_update = datetime.now() - timedelta(hours=2)
+        last_update = datetime.now() - timedelta(hours=3)
         job_queue.run_repeating(
-                update_billing, interval=1200, first=2, context=update.message
+                reload_data, interval=864000, first=864000, context=update.message
         )
-    bot.send_message(chat_id=update.message.chat_id,text=update.message.from_user.first_name+", tudo pronto!")
+        job_queue.run_repeating(
+                update_billing, interval=1200, first=1200, context=update.message
+        )
+    bot.send_message(chat_id=update.message.chat_id,text=ID_TO_NAME[update.message.chat_id]+", tudo pronto!")
 
 
 def help(bot, update):
@@ -54,18 +60,10 @@ def help(bot, update):
         "programado - Informa os dados de todos os pedidos programados"
     )
 
-
-def status(bot, update):
-    bot.send_message(
-        chat_id=update.message.chat_id,
-        text="Informe o número do pedido",
-        reply_markup=ForceReply(),
-    )
-    status_attr(bot, update)
-
 def test(bot, update):
-        global data, last_update
-        cmd = update.message.text.split()[1]
+    global data, last_update
+    cmd = update.message.text.split()[0]
+    if len(cmd) > 1 and update.message.chat_id in admin_list:
         if cmd == "dump_id":
                 bot.send_message(
                         chat_id = update.message.chat_id,
@@ -81,37 +79,67 @@ def test(bot, update):
                         chat_id = update.message.chat_id,
                         text= last_update.strftime("%m/%d/%Y, %H:%M:%S")
                 )
-        elif cmd == "reload_data":
-                data.clear()
-                data = load_from_csv("report")
-                bot.send_message(
+    else:
+        bot.send_message(
                         chat_id = update.message.chat_id,
-                        text= "Done"
-                )
-        elif cmd == "help":
-                bot.send_message(
-                        chat_id = update.message.chat_id,
-                        text= "dump_id, data_size"
+                        text= "dump_id, data_size, last_update, /reload_data"
                 )
 
+def reload_data(bot, job):
+    global data, last_update
+    data.clear()
+    data, updates = update_from_csv("report_ita", data)
+    data, updates = update_from_csv("report_srv", data)
+    last_update = datetime.now() - timedelta(hours=3)
+    logger.info(job.context.from_user.first_name + " - Data resetado")
+    bot.send_message(
+            chat_id = job.context.chat_id,
+            text= "Data resetado " + last_update.strftime("%m/%d/%Y, %H:%M:%S")
+    )
+
+def reload_data_msg(bot, update):
+    global data, last_update
+    if update.message.chat_id in admin_list:
+        data.clear()
+        data, updates = update_from_csv("report_ita", data)
+        data, updates = update_from_csv("report_srv", data)
+        last_update = datetime.now() - timedelta(hours=3)
+        logger.info(update.message.from_user.first_name + " - Data resetado")
+        bot.send_message(
+                chat_id = update.message.chat_id,
+                text= "Data resetado " + last_update.strftime("%m/%d/%Y, %H:%M:%S")
+        )
+
 def update_billing(bot, job):
-    global data, user, id_list, last_update
+    global data, user, table
     options = webdriver.ChromeOptions()
-    # options.binary_location = os.environ["GOOGLE_CHROME_BIN"]
+    options.binary_location = os.environ["GOOGLE_CHROME_BIN"]
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--headless")
     browser = seleniumrequests.Chrome(executable_path=os.environ["CHROMEDRIVER_PATH"], chrome_options=options)
     browser.implicitly_wait(60)
-    logger.info(job.context.from_user.first_name + " - Iniciando crawler")
-    crawler = Crawler(browser, user)
-    crawler.run()
-    logger.info(job.context.from_user.first_name + " - Iniciando parse")
-    export_to_csv("report", crawler.table)
+
+    logger.info("Iniciando crawler ita")
+    crawler1 = Crawler(browser, user)
+    crawler1.run(1)
+    logger.info("Iniciando parse ita")
+    export_to_csv("report_ita", crawler1.table)
+    table = crawler1.table_raw
+
+    logger.info("Iniciando crawler srv")
+    crawler2 = Crawler(browser, user)
+    crawler2.run(2)
+    logger.info("Iniciando parse srv")
+    export_to_csv("report_srv", crawler2.table)
+    table += crawler2.table_raw
+    
     browser.quit()
-    data, updates = update_from_csv("report", data)
-    last_update = datetime.now() - timedelta(hours=2)
+    data, updates = update_from_csv("report_ita", data)
+    data, updates = update_from_csv("report_srv", data)
+    last_update = datetime.now() - timedelta(hours=3)
+
     logger.info(job.context.from_user.first_name + " - Checkando e notificando atualizações")
     if len(updates):
         for update in updates:
@@ -121,7 +149,7 @@ def update_billing(bot, job):
                                 bot.send_message(chat_id=chat_id, text=str(update))
 
 def first_load():
-    global data, user
+    global data, user, table
     options = webdriver.ChromeOptions()
     options.binary_location = os.environ["GOOGLE_CHROME_BIN"]
     options.add_argument("--disable-dev-shm-usage")
@@ -130,15 +158,36 @@ def first_load():
     options.add_argument("--headless")
     browser = seleniumrequests.Chrome(executable_path=os.environ["CHROMEDRIVER_PATH"], chrome_options=options)
     browser.implicitly_wait(60)
-    logger.info("Iniciando crawler (first load)")
-    crawler = Crawler(browser, user)
-    crawler.run()
-    logger.info("Iniciando parse (first load)")
-    export_to_csv("report", crawler.table)
-    browser.quit()
-    data, updates = update_from_csv("report", data)
-    last_update = datetime.now() - timedelta(hours=2)
 
+    logger.info("Iniciando crawler ita (first load)")
+    crawler1 = Crawler(browser, user)
+    crawler1.run(1)
+    logger.info("Iniciando parse ita (first load)")
+    export_to_csv("report_ita", crawler1.table)
+    table = crawler1.table_raw
+
+    logger.info("Iniciando crawler srv (first load)")
+    crawler2 = Crawler(browser, user)
+    crawler2.run(2)
+    logger.info("Iniciando parse srv (first load)")
+    export_to_csv("report_srv", crawler2.table)
+    table += crawler2.table_raw
+    
+    browser.quit()
+    data, updates = update_from_csv("report_ita", data)
+    data, updates = update_from_csv("report_srv", data)
+    last_update = datetime.now() - timedelta(hours=3)
+
+def save_html(bot, update):
+    global admin_list, table
+    log = update.message.from_user.first_name + " - Download"
+    if update.message.chat_id in admin_list:
+        download("Pedidos", table)
+        bot.send_document(chat_id=update.message.chat_id, document=open("Pedidos.html", 'rb'))
+    else:
+        bot.send_message(chat_id=update.message.chat_id, text="Você não possiu acesso a este recurso")
+        log += " - Invalido"
+    logger.info(log)
 
 def noncommand(bot, update):
     global data
@@ -188,7 +237,8 @@ def main():
     dp.add_handler(CommandHandler("start", start, pass_job_queue=True))
     dp.add_handler(CommandHandler("ajuda", help ))
     dp.add_handler(CommandHandler("test", test))
-
+    dp.add_handler(CommandHandler("download", save_html))
+    dp.add_handler(CommandHandler("reload_data", reload_data_msg))
     # on noncommand i.e message - echo the message on Telegram
     dp.add_handler(MessageHandler(Filters.text, noncommand))
 

@@ -20,7 +20,10 @@ class Crawler:
         self.browser = browser
         self.logged = False
         self.user = user
-        self.table = ''
+        self.table_ita = ''
+        self.table_srv = ''
+        self.table_raw = ''
+        self.tables = ''
 
     def login(self):
         try:
@@ -57,14 +60,21 @@ class Crawler:
         }
 
         return data
+    
+    def change(self, idx):
+        option = self.browser.find_element_by_xpath('//*[@id="BDados"]/option[{}]'.format(idx)).click()
+        time.sleep(5)
+        return
 
-    def run(self):
+    def run(self, idx):
         if not self.logged:
             self.browser.get(self.url(""))
             self.login()
         post_data = self.build_data()
+        self.change(idx)
         r = self.browser.request('POST', self.url("vds/RelStatusPedido.php"), data = post_data)
         html = r.text
         soup = BeautifulSoup(html)
+        self.table_raw = html
         self.table = soup.find("table")
         return

@@ -4,23 +4,29 @@ from instance import Instance
 from datetime import datetime
 
 REP_TO_ID = {
-    "S01-014" : 650172463,
+    "S01-014" : 912511604,
+    "S32-004" : 835688488,
 }
 
 ID_TO_NAME = {
-    650172463 : "Roberto",
+    912511604 : "Roberto",
     1066700692: "Paulo",
+    650172463 : "Vinicius",
+    835688488 : "Dilvo",
 }
 
 """
-S01-014 -> Roberto
-S32-004 -> Dilvo
 S32-006 -> Laercio
-S40-002 -> Sandra"""
+S40-002 -> Sandra
+"""
 
 def read_token():
     return open("token", "r").read()
 
+def download(filename, data):
+    file = open(filename + ".html", "w")
+    file.write(data)
+    file.close()
 
 def export_to_csv(filename, table):
     output_rows = []
@@ -36,7 +42,6 @@ def export_to_csv(filename, table):
 
 
 def load_from_csv(filename):
-    data = []
     with open(filename + ".csv", "r") as csvfile:
         csv_reader = csv.DictReader(csvfile)
         for row in csv_reader:
